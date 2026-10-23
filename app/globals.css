@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0e1014;
+  --bg-elevated: #16191f;
+  --bg-surface: #1e222a;
+  --line: #2c313b;
+  --text: #f4f5f7;
+  --text-soft: #a3a8b3;
+  --text-inverse: #12141a;
+  --accent: #f4f5f7;
+  --sale: #e24b4b;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-elevated: var(--bg-elevated);
+  --color-surface: var(--bg-surface);
+  --color-line: var(--line);
+  --color-fg: var(--text);
+  --color-fg-soft: var(--text-soft);
+  --color-inverse: var(--text-inverse);
+  --color-accent: var(--accent);
+  --color-sale: var(--sale);
+  --font-sans: var(--font-manrope), sans-serif;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  overflow-x: clip;
+  background: var(--bg);
+  color: var(--text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"] {
+  accent-color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .press:active {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .press:active {
+    transform: scale(0.98);
+  }
+}
