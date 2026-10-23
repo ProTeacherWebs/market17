@@ -5,19 +5,10 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { categoryTree } from "@/lib/query";
+import { currentUser, useShop } from "@/lib/store";
 import type { Category } from "@/lib/types";
 
 const ease = [0.16, 1, 0.3, 1] as const;
-
-const links = [
-  { href: "/catalog", label: "Все товары" },
-  { href: "/promo", label: "Акции" },
-  { href: "/stores", label: "Магазины" },
-  { href: "/delivery", label: "Доставка" },
-  { href: "/compare", label: "Сравнение" },
-  { href: "/favorites", label: "Избранное" },
-  { href: "/login", label: "Вход" },
-];
 
 function focusable(root: HTMLElement) {
   return [...root.querySelectorAll<HTMLElement>("a, button, input, select, textarea")].filter(
@@ -35,6 +26,18 @@ export function CatalogMenu({
   onClose: () => void;
 }) {
   const reduce = useReducedMotion();
+  const users = useShop((state) => state.users);
+  const sessionUserId = useShop((state) => state.sessionUserId);
+  const user = currentUser({ users, sessionUserId });
+  const links = [
+    { href: "/catalog", label: "Все товары" },
+    { href: "/promo", label: "Акции" },
+    { href: "/stores", label: "Магазины" },
+    { href: "/delivery", label: "Доставка" },
+    { href: "/compare", label: "Сравнение" },
+    { href: "/favorites", label: "Избранное" },
+    { href: user ? "/account" : "/login", label: user ? "Кабинет" : "Вход" },
+  ];
   const mobileRef = useRef<HTMLDivElement>(null);
   const desktopRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);

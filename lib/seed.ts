@@ -307,6 +307,7 @@ export function createSeed(passwordHash: string): Omit<ShopData, "guestId"> {
     banners,
     carts: [],
     cartItems: [],
+    favorites: [],
     orders: [],
     orderItems: [],
     loginAttempts: [],

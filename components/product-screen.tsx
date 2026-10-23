@@ -12,7 +12,7 @@ import { ProductCard } from "@/components/product-card";
 import { Button, controlClass } from "@/components/ui";
 import { discountLabel, discountPercent, formatPrice } from "@/lib/format";
 import { relatedProducts } from "@/lib/query";
-import { guestLines, useShop } from "@/lib/store";
+import { activeLines, currentUser, isFavorite, useShop } from "@/lib/store";
 
 export function ProductScreen() {
   const params = useParams<{ slug: string }>();
@@ -25,9 +25,17 @@ export function ProductScreen() {
   const compareIds = useShop((state) => state.compareIds);
   const carts = useShop((state) => state.carts);
   const cartItems = useShop((state) => state.cartItems);
-  const lines = useMemo(() => guestLines({ carts, cartItems }), [carts, cartItems]);
+  const sessionUserId = useShop((state) => state.sessionUserId);
+  const users = useShop((state) => state.users);
+  const favorites = useShop((state) => state.favorites);
+  const lines = useMemo(
+    () => activeLines({ carts, cartItems, sessionUserId }),
+    [carts, cartItems, sessionUserId],
+  );
+  const user = useMemo(() => currentUser({ users, sessionUserId }), [users, sessionUserId]);
   const addToCart = useShop((state) => state.addToCart);
   const toggleCompare = useShop((state) => state.toggleCompare);
+  const toggleFavorite = useShop((state) => state.toggleFavorite);
   const [photo, setPhoto] = useState(0);
   const [qty, setQty] = useState(1);
   const [compareNote, setCompareNote] = useState("");
@@ -92,6 +100,7 @@ export function ProductScreen() {
   const room = Math.max(0, product.stock - inCart);
   const related = relatedProducts(products, product);
   const compared = compareIds.includes(product.id);
+  const favored = isFavorite({ favorites, sessionUserId }, product.id);
 
   return (
     <Container className="py-8">
@@ -184,10 +193,24 @@ export function ProductScreen() {
             >
               {compared ? "В сравнении" : "В сравнение"}
             </Button>
-            <Link href="/login" className={controlClass("ghost")}>
-              <Heart size={18} weight="regular" />
-              В избранное
-            </Link>
+            {user ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => toggleFavorite(product.id)}
+              >
+                <Heart size={18} weight={favored ? "fill" : "regular"} />
+                {favored ? "В избранном" : "В избранное"}
+              </Button>
+            ) : (
+              <Link
+                href={`/login?next=${encodeURIComponent(`/product/${product.slug}`)}`}
+                className={controlClass("ghost")}
+              >
+                <Heart size={18} weight="regular" />
+                В избранное
+              </Link>
+            )}
           </div>
           {inCart > 0 ? <p className="mt-3 text-[13px] text-fg-soft">В корзине {inCart} шт.</p> : null}
           {compareNote ? <p className="mt-2 text-[13px]">{compareNote}</p> : null}

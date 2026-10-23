@@ -66,6 +66,11 @@ export type CartItem = {
   qty: number;
 };
 
+export type Favorite = {
+  userId: string;
+  productId: string;
+};
+
 export type OrderStatus = "pending_payment" | "confirmed" | "shipping" | "done" | "cancelled";
 export type PaymentStatus = "unpaid";
 export type DeliveryMethod = "courier" | "pickup";
@@ -110,6 +115,7 @@ export type ShopData = {
   banners: Banner[];
   carts: Cart[];
   cartItems: CartItem[];
+  favorites: Favorite[];
   orders: Order[];
   orderItems: OrderItem[];
   loginAttempts: LoginAttempt[];

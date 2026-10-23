@@ -4,12 +4,15 @@ import Link from "next/link";
 import { Container } from "@/components/container";
 import { categoryTree } from "@/lib/query";
 import { seedCategories } from "@/lib/seed";
-import { useShop } from "@/lib/store";
+import { currentUser, useShop } from "@/lib/store";
 import { supportEmail, supportPhone, supportPhoneHref } from "@/lib/site";
 
 export function Footer() {
   const ready = useShop((state) => state.ready);
   const stored = useShop((state) => state.categories);
+  const users = useShop((state) => state.users);
+  const sessionUserId = useShop((state) => state.sessionUserId);
+  const user = currentUser({ users, sessionUserId });
   const categories = ready && stored.length > 0 ? stored : seedCategories;
   const parents = categoryTree(categories);
   const year = new Date().getFullYear();
@@ -50,11 +53,19 @@ export function Footer() {
         <div>
           <p className="font-semibold">Кабинет</p>
           <div className="mt-3 grid gap-2">
-            <Link href="/login" className="text-fg-soft">
-              Вход
+            <Link href={user ? "/account" : "/login"} className="text-fg-soft">
+              {user ? "Кабинет" : "Вход"}
             </Link>
             <Link href="/cart" className="text-fg-soft">
               Корзина
+            </Link>
+            {user ? (
+              <Link href="/favorites" className="text-fg-soft">
+                Избранное
+              </Link>
+            ) : null}
+            <Link href="/compare" className="text-fg-soft">
+              Сравнение
             </Link>
           </div>
           <p className="mt-6 text-[13px] text-fg-soft">

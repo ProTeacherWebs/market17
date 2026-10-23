@@ -7,7 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { CatalogMenu } from "@/components/catalog-menu";
 import { seedCategories } from "@/lib/seed";
-import { guestLines, useShop } from "@/lib/store";
+import { activeLines, currentUser, useShop } from "@/lib/store";
 
 function CartBadge({ count }: { count: number }) {
   const reduce = useReducedMotion();
@@ -42,9 +42,12 @@ export function Header() {
   const stored = useShop((state) => state.categories);
   const carts = useShop((state) => state.carts);
   const cartItems = useShop((state) => state.cartItems);
+  const users = useShop((state) => state.users);
+  const sessionUserId = useShop((state) => state.sessionUserId);
+  const user = useMemo(() => currentUser({ users, sessionUserId }), [users, sessionUserId]);
   const count = useMemo(
-    () => guestLines({ carts, cartItems }).reduce((sum, item) => sum + item.qty, 0),
-    [carts, cartItems],
+    () => activeLines({ carts, cartItems, sessionUserId }).reduce((sum, item) => sum + item.qty, 0),
+    [carts, cartItems, sessionUserId],
   );
   const categories = ready && stored.length > 0 ? stored : seedCategories;
   const [openPath, setOpenPath] = useState<string | null>(null);
@@ -123,7 +126,11 @@ export function Header() {
             <ShoppingCart size={22} weight="regular" />
             {count > 0 ? <CartBadge count={count} /> : null}
           </Link>
-          <Link href="/login" aria-label="Вход" className="hidden h-11 w-11 place-items-center lg:grid">
+          <Link
+            href={user ? "/account" : "/login"}
+            aria-label={user ? "Кабинет" : "Вход"}
+            className="hidden h-11 w-11 place-items-center lg:grid"
+          >
             <User size={22} weight="regular" />
           </Link>
         </div>

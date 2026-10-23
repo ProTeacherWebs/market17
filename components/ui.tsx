@@ -20,7 +20,7 @@ export function Button({
 }
 
 export const inputClass =
-  "h-11 w-full rounded-[10px] border border-line bg-elevated px-3 text-[16px] text-fg placeholder:text-fg-soft";
+  "h-11 w-full rounded-[10px] border border-line bg-elevated px-3 text-[16px] text-fg placeholder:text-fg-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg";
 
 export function Field({
   label,

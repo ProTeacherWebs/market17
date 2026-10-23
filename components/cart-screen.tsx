@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import { Container } from "@/components/container";
 import { controlClass } from "@/components/ui";
 import { formatPrice } from "@/lib/format";
-import { guestLines, useShop } from "@/lib/store";
+import { activeLines, useShop } from "@/lib/store";
 
 export function CartScreen() {
   const ready = useShop((state) => state.ready);
@@ -15,7 +15,11 @@ export function CartScreen() {
   const products = useShop((state) => state.products);
   const carts = useShop((state) => state.carts);
   const cartItems = useShop((state) => state.cartItems);
-  const lines = useMemo(() => guestLines({ carts, cartItems }), [carts, cartItems]);
+  const sessionUserId = useShop((state) => state.sessionUserId);
+  const lines = useMemo(
+    () => activeLines({ carts, cartItems, sessionUserId }),
+    [carts, cartItems, sessionUserId],
+  );
   const setQty = useShop((state) => state.setQty);
   const removeFromCart = useShop((state) => state.removeFromCart);
 
