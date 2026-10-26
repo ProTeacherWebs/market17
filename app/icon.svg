@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#0E1014"/>
+  <!-- Volt mark: geometric lightning that reads as a sharp V at tab size -->
+  <path
+    fill="#F4F5F7"
+    d="M18.7 5.5 9.4 17.35h5.05L11.3 26.5l11.3-13.05h-5.2L21.1 5.5H18.7Z"
+  />
+</svg>
