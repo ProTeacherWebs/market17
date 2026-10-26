@@ -115,6 +115,17 @@ export function CartScreen() {
             <span>Итого</span>
             <span className="text-[18px] font-bold">{formatPrice(total)}</span>
           </div>
+          <div className="mt-6">
+            {sessionUserId ? (
+              <Link href="/checkout" className={controlClass()}>
+                Оформить заказ
+              </Link>
+            ) : (
+              <Link href="/login?next=/checkout" className={controlClass()}>
+                Войти и оформить
+              </Link>
+            )}
+          </div>
         </>
       )}
     </Container>

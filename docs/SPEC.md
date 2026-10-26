@@ -27,12 +27,18 @@ AUTH_SECRET=
 AUTH_GOOGLE_ID=
 AUTH_GOOGLE_SECRET=
 ADMIN_EMAIL=
-PAYMENT_PROVIDER=mock
-YOOKASSA_SHOP_ID=
-YOOKASSA_SECRET_KEY=
+PAYMENT_PROVIDER=stripe
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
+NEXT_PUBLIC_APP_URL=
+EXCHANGE_RATE_UZS=
+NEXT_PUBLIC_EXCHANGE_RATE_UZS=
+UZS_PER_USD=
+NEXT_PUBLIC_UZS_PER_USD=
 ```
 
-`PAYMENT_PROVIDER=mock` в первой версии. Значение `yookassa` зарезервировано и в этой версии отвечает ошибкой «оплата ещё не подключена», пока нет отдельной задачи на боевой вызов.
+`PAYMENT_PROVIDER=stripe`, `STRIPE_SECRET_KEY`, `EXCHANGE_RATE_UZS` (сум за 1 ₽) и `UZS_PER_USD` (сум за 1 $) включают Checkout в `usd`. Цепочка: рубли → сумы → доллары. Без них `POST /payments` → 501.
 
 ## Дизайн-система
 
@@ -232,7 +238,7 @@ YOOKASSA_SECRET_KEY=
 
 Отмена человеком в v1 нет. Отменяет администратор. При отмене остаток возвращается. Повторная отмена остаток не удваивает.
 
-Оплата: `paymentStatus` = `unpaid`. Текст на успехе: «Заказ № принят. Оплата картой появится позже, сейчас ничего не списано.»
+Оплата: `paymentStatus` = `unpaid | pending | paid | failed`, поле `paymentId` (Stripe Checkout Session). Кнопка «Оплатить картой» на успехе и в карточке заказа. После успешного теста статус заказа → `confirmed`, оплата → `paid`.
 
 ## Вход и кабинет
 
@@ -356,31 +362,22 @@ Auth.js добавляет свои таблицы `Account` и `Session`. Их 
 | PATCH/DELETE `/admin/products/:id` | admin | Правка. Удаление прячет `published=false`, строку не стирает, если товар есть в заказах |
 | CRUD `/admin/categories` | admin | Как в разделе админки |
 | GET/PATCH `/admin/banners` | admin | Три слота |
-| POST `/payments` | сессия | v1: 501 и текст, что оплата не подключена. Тело зарезервировано: `{ "orderId" }` |
-| POST `/payments/webhook` | ЮKassa | v1: 501. Позже проверка подписи |
+| POST `/payments` | клиент | Создаёт Stripe Checkout Session. Тело: `{ orderId, number, total, email? }`. Без ключей — 501 |
+| GET `/payments/confirm?session_id=` | клиент | Проверяет Session у Stripe, отдаёт `paymentStatus` и сумму для записи в заказ |
+| POST `/payments/webhook` | Stripe | После Postgres: `checkout.session.completed`. Пока не обязателен — confirm по `session_id` |
 
 Сравнение на сервер не пишем. Это список id в `localStorage`, ключ `volta-compare`, максимум 4.
 
 Избранное только на сервере, потому что это часть кабинета.
 
-## Оплата, как её подключать потом
+## Оплата Stripe (тест)
 
-Интерфейс в коде, одна реализация `mock`:
-
-```
-createPayment(order) -> { status: "unavailable" }
-handleWebhook(body, headers) -> не вызывается в v1
-```
-
-Когда дойдут до ЮKassa (тестовый магазин):
-
-1. `POST https://api.yookassa.ru/v3/payments` с Basic-авторизацией shopId и секретного ключа.
-2. Заголовки `Idempotence-Key: order.number`, сумма строкой с двумя знаками (`"12990.00"`), валюта `RUB`, `capture: true`, `confirmation.type: redirect`, `return_url` на `/checkout/success`.
-3. В заказ пишется `paymentId` и `paymentStatus=pending`.
-4. Вебхук `payment.succeeded` переводит заказ в `paid` только если сумма совпала. `payment.canceled` ставит `failed`, сам заказ не удаляет.
-5. Секрет вебхука проверяется. Без проверки статус не меняется.
-
-Это описание стыка, не задача на реализацию в первой очереди. В TASKS за это отвечает T18, и она ограничена заглушкой и комментарием в коде со ссылкой на этот раздел.
+1. `POST /api/v1/payments` создаёт Checkout Session (`mode=payment`, `currency=usd`).
+2. Конвертация: `amountUzs = round(totalRub * EXCHANGE_RATE_UZS)`, `amountUsdCents = round(amountUzs / UZS_PER_USD * 100)`.
+3. Metadata: `orderId`, `number`, `amountRub`, `amountUzs`, `amountUsdCents`, курсы.
+4. Confirm сверяет USD сессии и рубли заказа → `paid` / `confirmed`.
+5. Cancel → `failed`, кнопка снова доступна. Webhook — D06.
+6. Витрина в ₽; эквивалент в сумах для человека; списание в Stripe — USD.
 
 ## Telegram и Expo, стык
 

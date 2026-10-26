@@ -9,9 +9,19 @@ import {
   validatePasswordRepeat,
 } from "@/lib/auth";
 import { sha256 } from "@/lib/hash";
+import { deliveryFeeFor } from "@/lib/format";
 import { createSeed } from "@/lib/seed";
 import { demoAdminPassword } from "@/lib/site";
-import type { Cart, CartItem, Product, ShopData, User } from "@/lib/types";
+import type {
+  Cart,
+  CartItem,
+  DeliveryMethod,
+  Order,
+  OrderItem,
+  Product,
+  ShopData,
+  User,
+} from "@/lib/types";
 
 export type FieldErrors = Record<string, string>;
 
@@ -20,6 +30,18 @@ export type AuthResult = {
   errors: FieldErrors;
   locked?: boolean;
 };
+
+export type PlaceOrderInput = {
+  phone: string;
+  recipientName: string;
+  deliveryMethod: DeliveryMethod;
+  addressLine: string | null;
+  comment: string | null;
+};
+
+export type PlaceOrderResult =
+  | { ok: true; orderId: string; number: string }
+  | { ok: false; errors: FieldErrors; stockError?: string };
 
 type ShopState = ShopData & {
   ready: boolean;
@@ -39,6 +61,14 @@ type ShopState = ShopData & {
   removeFromCart: (productId: string) => void;
   toggleCompare: (productId: string) => boolean;
   toggleFavorite: (productId: string) => boolean;
+  placeOrder: (input: PlaceOrderInput) => PlaceOrderResult;
+  markPaymentPending: (orderId: string, paymentId: string) => void;
+  markPaymentFailed: (orderId: string) => void;
+  applyPaidSession: (input: {
+    orderId: string;
+    paymentId: string;
+    amountKopecks: number;
+  }) => { ok: true } | { ok: false; error: string };
 };
 
 const empty: ShopData & { sessionUserId: string | null } = {
@@ -139,6 +169,44 @@ export function isFavorite(
 
 export function avatarSrc(user: User | null) {
   return user?.image || "/avatars/default.jpg";
+}
+
+function normalizeOrder(order: Order): Order {
+  return {
+    ...order,
+    paymentId: order.paymentId ?? null,
+    paymentStatus: order.paymentStatus ?? "unpaid",
+  };
+}
+
+export function userOrders(state: Pick<ShopData, "orders"> & { sessionUserId: string | null }) {
+  if (!state.sessionUserId) return [];
+  return state.orders
+    .filter((order) => order.userId === state.sessionUserId)
+    .map(normalizeOrder)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export function orderWithItems(
+  state: Pick<ShopData, "orders" | "orderItems">,
+  orderId: string,
+) {
+  const found = state.orders.find((item) => item.id === orderId);
+  if (!found) return null;
+  const order = normalizeOrder(found);
+  return {
+    order,
+    items: state.orderItems.filter((item) => item.orderId === order.id),
+  };
+}
+
+function nextOrderNumber(orders: Order[]) {
+  let max = 1000;
+  for (const order of orders) {
+    const match = /^V-(\d+)$/.exec(order.number);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return `V-${max + 1}`;
 }
 
 export const useShop = create<ShopState>()(
@@ -472,6 +540,127 @@ export const useShop = create<ShopState>()(
           favorites: [...state.favorites, { userId, productId }],
         }));
         return true;
+      },
+      placeOrder: (input): PlaceOrderResult => {
+        const user = currentUser(get());
+        if (!user) return { ok: false, errors: { form: "Нужен вход" } };
+
+        const phone = input.phone.trim();
+        const recipientName = input.recipientName.trim();
+        const errors: FieldErrors = {};
+        if (!phone) errors.phone = "Укажите телефон";
+        if (!recipientName) errors.recipientName = "Укажите имя получателя";
+        if (input.deliveryMethod === "courier" && !input.addressLine?.trim()) {
+          errors.addressLine = "Укажите адрес";
+        }
+        if (Object.keys(errors).length) return { ok: false, errors };
+
+        const cart = findCart(get().carts, user.id);
+        if (!cart) return { ok: false, errors: { form: "Корзина пуста" } };
+        const lines = linesFor(cart.id, get().cartItems);
+        if (!lines.length) return { ok: false, errors: { form: "Корзина пуста" } };
+
+        const snapshot: { product: Product; qty: number }[] = [];
+        for (const line of lines) {
+          const product = get().products.find((item) => item.id === line.productId && item.published);
+          if (!product) {
+            return { ok: false, errors: { form: "Товар больше недоступен" }, stockError: line.productId };
+          }
+          if (product.stock < line.qty) {
+            return {
+              ok: false,
+              errors: { form: `Не хватает «${product.name}»` },
+              stockError: product.id,
+            };
+          }
+          snapshot.push({ product, qty: line.qty });
+        }
+
+        const itemsTotal = snapshot.reduce((sum, row) => sum + row.product.price * row.qty, 0);
+        const deliveryFee = deliveryFeeFor(itemsTotal, input.deliveryMethod);
+        const orderId = `order-${crypto.randomUUID()}`;
+        const number = nextOrderNumber(get().orders);
+        const order: Order = {
+          id: orderId,
+          number,
+          userId: user.id,
+          status: "pending_payment",
+          paymentStatus: "unpaid",
+          paymentId: null,
+          deliveryMethod: input.deliveryMethod,
+          phone,
+          recipientName,
+          addressLine: input.deliveryMethod === "courier" ? input.addressLine!.trim() : null,
+          comment: input.comment?.trim() || null,
+          itemsTotal,
+          deliveryFee,
+          total: itemsTotal + deliveryFee,
+          createdAt: new Date().toISOString(),
+        };
+        const orderItems: OrderItem[] = snapshot.map((row) => ({
+          id: `oi-${orderId}-${row.product.id}`,
+          orderId,
+          productId: row.product.id,
+          name: row.product.name,
+          price: row.product.price,
+          qty: row.qty,
+        }));
+
+        set((state) => {
+          const stockMap = new Map(snapshot.map((row) => [row.product.id, row.qty]));
+          return {
+            products: state.products.map((product) => {
+              const take = stockMap.get(product.id);
+              if (!take) return product;
+              return { ...product, stock: Math.max(0, product.stock - take) };
+            }),
+            orders: [...state.orders, order],
+            orderItems: [...state.orderItems, ...orderItems],
+            cartItems: state.cartItems.filter((item) => item.cartId !== cart.id),
+          };
+        });
+
+        return { ok: true, orderId, number };
+      },
+      markPaymentPending: (orderId, paymentId) => {
+        set((state) => ({
+          orders: state.orders.map((order) =>
+            order.id === orderId && order.paymentStatus !== "paid"
+              ? { ...order, paymentStatus: "pending", paymentId }
+              : order,
+          ),
+        }));
+      },
+      markPaymentFailed: (orderId) => {
+        set((state) => ({
+          orders: state.orders.map((order) =>
+            order.id === orderId && order.paymentStatus !== "paid"
+              ? { ...order, paymentStatus: "failed" }
+              : order,
+          ),
+        }));
+      },
+      applyPaidSession: ({ orderId, paymentId, amountKopecks }) => {
+        const order = get().orders.find((item) => item.id === orderId);
+        if (!order) return { ok: false, error: "Заказ не найден" };
+        if (order.userId !== get().sessionUserId) return { ok: false, error: "Чужой заказ" };
+        if (order.paymentStatus === "paid") return { ok: true };
+        if (Math.round(order.total * 100) !== amountKopecks) {
+          return { ok: false, error: "Сумма не совпала" };
+        }
+        set((state) => ({
+          orders: state.orders.map((item) =>
+            item.id === orderId
+              ? {
+                  ...item,
+                  paymentStatus: "paid",
+                  paymentId,
+                  status: item.status === "pending_payment" ? "confirmed" : item.status,
+                }
+              : item,
+          ),
+        }));
+        return { ok: true };
       },
     }),
     {

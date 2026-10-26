@@ -14,7 +14,10 @@ export function AccountNav() {
   return (
     <nav className="flex flex-wrap gap-2 border-b border-line pb-4">
       {items.map((item) => {
-        const current = pathname === item.href;
+        const current =
+          item.href === "/account/orders"
+            ? pathname === item.href || pathname.startsWith("/account/orders/")
+            : pathname === item.href;
         return (
           <Link
             key={item.href}

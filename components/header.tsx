@@ -2,12 +2,13 @@
 
 import { List, MagnifyingGlass, Scales, Heart, ShoppingCart, User } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { CatalogMenu } from "@/components/catalog-menu";
 import { seedCategories } from "@/lib/seed";
-import { activeLines, currentUser, useShop } from "@/lib/store";
+import { activeLines, avatarSrc, currentUser, useShop } from "@/lib/store";
 
 function CartBadge({ count }: { count: number }) {
   const reduce = useReducedMotion();
@@ -126,13 +127,28 @@ export function Header() {
             <ShoppingCart size={22} weight="regular" />
             {count > 0 ? <CartBadge count={count} /> : null}
           </Link>
-          <Link
-            href={user ? "/account" : "/login"}
-            aria-label={user ? "Кабинет" : "Вход"}
-            className="hidden h-11 w-11 place-items-center lg:grid"
-          >
-            <User size={22} weight="regular" />
-          </Link>
+          {user ? (
+            <Link
+              href="/account"
+              aria-label="Кабинет"
+              className="grid h-11 w-11 place-items-center"
+            >
+              <span className="relative block h-9 w-9 overflow-hidden rounded-full bg-elevated ring-1 ring-line">
+                <Image
+                  src={avatarSrc(user)}
+                  alt=""
+                  fill
+                  unoptimized
+                  className="object-cover"
+                  sizes="36px"
+                />
+              </span>
+            </Link>
+          ) : (
+            <Link href="/login" aria-label="Вход" className="hidden h-11 w-11 place-items-center lg:grid">
+              <User size={22} weight="regular" />
+            </Link>
+          )}
         </div>
       </div>
     </header>

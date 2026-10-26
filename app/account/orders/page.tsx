@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { AccountOrdersStub } from "@/components/account-orders-stub";
+import { AccountOrdersScreen } from "@/components/account-orders-screen";
 
 export const metadata: Metadata = { title: "Заказы" };
 
 export default function Page() {
-  return <AccountOrdersStub />;
+  return <AccountOrdersScreen />;
 }

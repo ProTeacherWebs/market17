@@ -72,7 +72,7 @@ export type Favorite = {
 };
 
 export type OrderStatus = "pending_payment" | "confirmed" | "shipping" | "done" | "cancelled";
-export type PaymentStatus = "unpaid";
+export type PaymentStatus = "unpaid" | "pending" | "paid" | "failed";
 export type DeliveryMethod = "courier" | "pickup";
 
 export type Order = {
@@ -81,6 +81,7 @@ export type Order = {
   userId: string;
   status: OrderStatus;
   paymentStatus: PaymentStatus;
+  paymentId: string | null;
   deliveryMethod: DeliveryMethod;
   phone: string;
   recipientName: string;

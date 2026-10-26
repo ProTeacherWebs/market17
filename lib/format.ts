@@ -1,3 +1,5 @@
+import { courierFee, freeDeliveryFrom } from "@/lib/site";
+
 export function formatPrice(value: number) {
   return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
 }
@@ -22,4 +24,48 @@ export function pluralProducts(count: number) {
 export function readInt(value: string | null) {
   if (!value || !/^\d+$/.test(value)) return null;
   return Number(value);
+}
+
+export function orderStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    pending_payment: "Ждёт оплату",
+    confirmed: "Подтверждён",
+    shipping: "В доставке",
+    done: "Выполнен",
+    cancelled: "Отменён",
+  };
+  return map[status] ?? status;
+}
+
+export function paymentStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    unpaid: "Не оплачен",
+    pending: "Оплата в процессе",
+    paid: "Оплачен",
+    failed: "Оплата не прошла",
+  };
+  return map[status] ?? status;
+}
+
+export function deliveryMethodLabel(method: string) {
+  if (method === "courier") return "Курьер";
+  if (method === "pickup") return "Самовывоз";
+  return method;
+}
+
+export function formatOrderDate(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+export function deliveryFeeFor(itemsTotal: number, method: "courier" | "pickup") {
+  if (method === "pickup") return 0;
+  return itemsTotal >= freeDeliveryFrom ? 0 : courierFee;
 }
