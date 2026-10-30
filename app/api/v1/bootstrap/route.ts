@@ -13,6 +13,10 @@ import {
 export async function GET(request: Request) {
   const blocked = await withApiGuard(request);
   if (blocked) return blocked;
+  if (!process.env.DATABASE_URL?.trim()) {
+    return jsonError("База не настроена (DATABASE_URL)", 503);
+  }
+
   try {
     const [categories, products, specs, banners] = await Promise.all([
       prisma.category.findMany({ orderBy: [{ sort: "asc" }, { name: "asc" }] }),
@@ -26,7 +30,8 @@ export async function GET(request: Request) {
       specs: specs.map(serializeSpec),
       banners: banners.map(serializeBanner),
     });
-  } catch {
+  } catch (error) {
+    console.error("[bootstrap]", error);
     return jsonError("Не удалось загрузить каталог", 500);
   }
 }
