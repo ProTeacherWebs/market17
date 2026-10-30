@@ -10,14 +10,17 @@ import {
 } from "@/lib/auth";
 import { sha256 } from "@/lib/hash";
 import { deliveryFeeFor } from "@/lib/format";
-import { createSeed } from "@/lib/seed";
-import { demoAdminPassword } from "@/lib/site";
+import { uniqueSlug, wordCount } from "@/lib/slug";
 import type {
+  Banner,
+  BannerSlot,
   Cart,
   CartItem,
+  Category,
   DeliveryMethod,
   Order,
   OrderItem,
+  OrderStatus,
   Product,
   ShopData,
   User,
@@ -42,6 +45,38 @@ export type PlaceOrderInput = {
 export type PlaceOrderResult =
   | { ok: true; orderId: string; number: string }
   | { ok: false; errors: FieldErrors; stockError?: string };
+
+export type ProductInput = {
+  name: string;
+  slug: string;
+  brand: string;
+  description: string;
+  price: string;
+  compareAtPrice: string;
+  stock: string;
+  categoryId: string;
+  imageUrl: string;
+  published: boolean;
+};
+
+export type CategoryInput = {
+  name: string;
+  slug: string;
+  parentId: string | null;
+  sort: string;
+};
+
+export type BannerInput = {
+  title: string;
+  subtitle: string;
+  href: string;
+  imageUrl: string;
+  enabled: boolean;
+};
+
+export type AdminMutation =
+  | { ok: true; id?: string }
+  | { ok: false; errors: FieldErrors };
 
 type ShopState = ShopData & {
   ready: boolean;
@@ -69,6 +104,12 @@ type ShopState = ShopData & {
     paymentId: string;
     amountKopecks: number;
   }) => { ok: true } | { ok: false; error: string };
+  setOrderStatus: (orderId: string, status: OrderStatus) => AdminMutation;
+  saveProduct: (input: ProductInput, productId?: string) => AdminMutation;
+  removeProduct: (productId: string) => AdminMutation;
+  saveCategory: (input: CategoryInput, categoryId?: string) => AdminMutation;
+  removeCategory: (categoryId: string) => AdminMutation;
+  saveBanner: (slot: BannerSlot, input: BannerInput) => AdminMutation;
 };
 
 const empty: ShopData & { sessionUserId: string | null } = {
@@ -159,6 +200,27 @@ export function currentUser(state: Pick<ShopData, "users"> & { sessionUserId: st
   return state.users.find((user) => user.id === state.sessionUserId) ?? null;
 }
 
+export function isAdmin(state: Pick<ShopData, "users"> & { sessionUserId: string | null }) {
+  return currentUser(state)?.role === "admin";
+}
+
+function requireAdmin(get: () => { users: User[]; sessionUserId: string | null }): AdminMutation | null {
+  if (!isAdmin(get())) return { ok: false, errors: { form: "Нет доступа" } };
+  return null;
+}
+
+export function adminStats(state: Pick<ShopData, "orders" | "products" | "users">) {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const startIso = start.toISOString();
+  return {
+    ordersToday: state.orders.filter((order) => order.createdAt >= startIso).length,
+    pendingPayment: state.orders.filter((order) => order.status === "pending_payment").length,
+    outOfStock: state.products.filter((product) => product.stock <= 0).length,
+    users: state.users.length,
+  };
+}
+
 export function isFavorite(
   state: Pick<ShopData, "favorites"> & { sessionUserId: string | null },
   productId: string,
@@ -219,31 +281,20 @@ export const useShop = create<ShopState>()(
         if (!seeding) {
           seeding = (async () => {
             if (!get().guestId) set({ guestId: crypto.randomUUID() });
-            const passwordHash = await sha256(demoAdminPassword);
-            const seed = createSeed(passwordHash);
-            if (get().products.length === seed.products.length) return;
-            const ids = new Set(seed.products.map((product) => product.id));
-            const sessionUserId = get().sessionUserId;
-            const users = (() => {
-              const byEmail = new Map(seed.users.map((user) => [user.email, user]));
-              for (const user of get().users) {
-                if (!byEmail.has(user.email)) byEmail.set(user.email, user);
-              }
-              return [...byEmail.values()];
-            })();
-            const userIds = new Set(users.map((user) => user.id));
+            const response = await fetch("/api/v1/bootstrap");
+            if (!response.ok) throw new Error("bootstrap");
+            const data = (await response.json()) as {
+              categories: ShopData["categories"];
+              products: ShopData["products"];
+              specs: ShopData["specs"];
+              banners: ShopData["banners"];
+            };
             set({
-              ...seed,
+              categories: data.categories,
+              products: data.products,
+              specs: data.specs,
+              banners: data.banners,
               guestId: get().guestId || crypto.randomUUID(),
-              sessionUserId: sessionUserId && userIds.has(sessionUserId) ? sessionUserId : null,
-              carts: get().carts,
-              cartItems: get().cartItems.filter((item) => ids.has(item.productId)),
-              favorites: (get().favorites ?? []).filter(
-                (item) => userIds.has(item.userId) && ids.has(item.productId),
-              ),
-              compareIds: get().compareIds.filter((id) => ids.has(id)),
-              loginAttempts: get().loginAttempts,
-              users,
             });
           })().finally(() => {
             seeding = null;
@@ -661,6 +712,252 @@ export const useShop = create<ShopState>()(
           ),
         }));
         return { ok: true };
+      },
+      setOrderStatus: (orderId, status) => {
+        const denied = requireAdmin(get);
+        if (denied) return denied;
+        const order = get().orders.find((item) => item.id === orderId);
+        if (!order) return { ok: false, errors: { form: "Заказ не найден" } };
+        const statuses: OrderStatus[] = [
+          "pending_payment",
+          "confirmed",
+          "shipping",
+          "done",
+          "cancelled",
+        ];
+        if (!statuses.includes(status)) {
+          return { ok: false, errors: { form: "Неизвестный статус" } };
+        }
+        if (order.status === status) return { ok: true };
+
+        set((state) => {
+          const restore = status === "cancelled" && order.status !== "cancelled";
+          const qtyByProduct = new Map<string, number>();
+          if (restore) {
+            for (const item of state.orderItems.filter((row) => row.orderId === orderId)) {
+              qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) ?? 0) + item.qty);
+            }
+          }
+          return {
+            orders: state.orders.map((item) =>
+              item.id === orderId ? { ...item, status } : item,
+            ),
+            products: restore
+              ? state.products.map((product) => {
+                  const add = qtyByProduct.get(product.id);
+                  if (!add) return product;
+                  return { ...product, stock: product.stock + add };
+                })
+              : state.products,
+          };
+        });
+        return { ok: true };
+      },
+      saveProduct: (input, productId) => {
+        const denied = requireAdmin(get);
+        if (denied) return denied;
+
+        const name = input.name.trim();
+        const brand = input.brand.trim();
+        const description = input.description.trim();
+        const imageUrl = input.imageUrl.trim();
+        const categoryId = input.categoryId.trim();
+        const price = Number(input.price);
+        const stock = Number(input.stock);
+        const compareRaw = input.compareAtPrice.trim();
+        const compareAtPrice = compareRaw ? Number(compareRaw) : null;
+
+        const errors: FieldErrors = {};
+        if (!name) errors.name = "Укажите название";
+        if (!brand) errors.brand = "Укажите бренд";
+        if (!description) errors.description = "Укажите описание";
+        if (!imageUrl) errors.imageUrl = "Укажите URL фото";
+        if (!get().categories.some((item) => item.id === categoryId)) {
+          errors.categoryId = "Выберите категорию";
+        }
+        if (!Number.isFinite(price) || price < 1 || !Number.isInteger(price)) {
+          errors.price = "Цена — целое число от 1";
+        }
+        if (!Number.isFinite(stock) || stock < 0 || !Number.isInteger(stock)) {
+          errors.stock = "Остаток — целое число от 0";
+        }
+        if (
+          compareRaw &&
+          (!Number.isFinite(compareAtPrice!) ||
+            compareAtPrice! < 1 ||
+            !Number.isInteger(compareAtPrice!) ||
+            compareAtPrice! <= price)
+        ) {
+          errors.compareAtPrice = "Старая цена больше новой";
+        }
+        if (Object.keys(errors).length) return { ok: false, errors };
+
+        const taken = new Set(get().products.map((item) => item.slug));
+        const existing = productId
+          ? get().products.find((item) => item.id === productId)
+          : undefined;
+        if (productId && !existing) return { ok: false, errors: { form: "Товар не найден" } };
+
+        const slugBase = input.slug.trim() || name;
+        const slug = uniqueSlug(slugBase, taken, existing?.slug);
+
+        if (existing) {
+          set((state) => ({
+            products: state.products.map((item) =>
+              item.id === existing.id
+                ? {
+                    ...item,
+                    name,
+                    slug,
+                    brand,
+                    description,
+                    price,
+                    compareAtPrice,
+                    stock,
+                    categoryId,
+                    published: input.published,
+                    images: [imageUrl],
+                  }
+                : item,
+            ),
+          }));
+          return { ok: true, id: existing.id };
+        }
+
+        const id = `product-${crypto.randomUUID()}`;
+        const product: Product = {
+          id,
+          slug,
+          name,
+          brand,
+          description,
+          price,
+          compareAtPrice,
+          stock,
+          categoryId,
+          published: input.published,
+          createdAt: new Date().toISOString(),
+          images: [imageUrl],
+        };
+        set((state) => ({ products: [...state.products, product] }));
+        return { ok: true, id };
+      },
+      removeProduct: (productId) => {
+        const denied = requireAdmin(get);
+        if (denied) return denied;
+        const product = get().products.find((item) => item.id === productId);
+        if (!product) return { ok: false, errors: { form: "Товар не найден" } };
+        const inOrders = get().orderItems.some((item) => item.productId === productId);
+        if (inOrders) {
+          set((state) => ({
+            products: state.products.map((item) =>
+              item.id === productId ? { ...item, published: false } : item,
+            ),
+          }));
+          return { ok: true, id: productId };
+        }
+        set((state) => ({
+          products: state.products.filter((item) => item.id !== productId),
+          specs: state.specs.filter((item) => item.productId !== productId),
+          cartItems: state.cartItems.filter((item) => item.productId !== productId),
+          favorites: state.favorites.filter((item) => item.productId !== productId),
+          compareIds: state.compareIds.filter((id) => id !== productId),
+        }));
+        return { ok: true, id: productId };
+      },
+      saveCategory: (input, categoryId) => {
+        const denied = requireAdmin(get);
+        if (denied) return denied;
+        const name = input.name.trim();
+        const parentId = input.parentId;
+        const sort = Number(input.sort);
+        const errors: FieldErrors = {};
+        if (!name) errors.name = "Укажите название";
+        if (!Number.isFinite(sort) || !Number.isInteger(sort) || sort < 0) {
+          errors.sort = "Порядок — целое число от 0";
+        }
+        if (parentId && !get().categories.some((item) => item.id === parentId)) {
+          errors.parentId = "Родитель не найден";
+        }
+        if (categoryId && parentId === categoryId) {
+          errors.parentId = "Категория не может быть родителем себе";
+        }
+        if (Object.keys(errors).length) return { ok: false, errors };
+
+        const taken = new Set(get().categories.map((item) => item.slug));
+        const existing = categoryId
+          ? get().categories.find((item) => item.id === categoryId)
+          : undefined;
+        if (categoryId && !existing) return { ok: false, errors: { form: "Категория не найдена" } };
+
+        const slug = uniqueSlug(input.slug.trim() || name, taken, existing?.slug);
+
+        if (existing) {
+          set((state) => ({
+            categories: state.categories.map((item) =>
+              item.id === existing.id
+                ? { ...item, name, slug, parentId, sort }
+                : item,
+            ),
+          }));
+          return { ok: true, id: existing.id };
+        }
+
+        const id = `cat-${crypto.randomUUID()}`;
+        const category: Category = { id, slug, name, parentId, sort };
+        set((state) => ({ categories: [...state.categories, category] }));
+        return { ok: true, id };
+      },
+      removeCategory: (categoryId) => {
+        const denied = requireAdmin(get);
+        if (denied) return denied;
+        const category = get().categories.find((item) => item.id === categoryId);
+        if (!category) return { ok: false, errors: { form: "Категория не найдена" } };
+        const hasProducts = get().products.some((item) => item.categoryId === categoryId);
+        if (hasProducts) {
+          return { ok: false, errors: { form: "Сначала уберите товары из категории" } };
+        }
+        const hasChildren = get().categories.some((item) => item.parentId === categoryId);
+        if (hasChildren) {
+          return { ok: false, errors: { form: "Сначала удалите подкатегории" } };
+        }
+        set((state) => ({
+          categories: state.categories.filter((item) => item.id !== categoryId),
+        }));
+        return { ok: true, id: categoryId };
+      },
+      saveBanner: (slot, input) => {
+        const denied = requireAdmin(get);
+        if (denied) return denied;
+        const title = input.title.trim();
+        const subtitle = input.subtitle.trim();
+        const href = input.href.trim();
+        const imageUrl = input.imageUrl.trim();
+        const errors: FieldErrors = {};
+        if (!title) errors.title = "Укажите заголовок";
+        if (!subtitle) errors.subtitle = "Укажите подзаголовок";
+        else if (wordCount(subtitle) > 12) errors.subtitle = "Не больше 12 слов";
+        if (!href.startsWith("/") || href.startsWith("//")) {
+          errors.href = "Ссылка внутри сайта, например /catalog";
+        }
+        if (!imageUrl) errors.imageUrl = "Укажите URL картинки";
+        if (Object.keys(errors).length) return { ok: false, errors };
+
+        const existing = get().banners.find((item) => item.slot === slot);
+        if (!existing) return { ok: false, errors: { form: "Слот не найден" } };
+
+        const next: Banner = {
+          ...existing,
+          title,
+          subtitle,
+          href,
+          imageUrl,
+          enabled: input.enabled,
+        };
+        set((state) => ({
+          banners: state.banners.map((item) => (item.slot === slot ? next : item)),
+        }));
+        return { ok: true, id: existing.id };
       },
     }),
     {

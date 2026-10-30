@@ -35,6 +35,15 @@ export function HeaderFallback() {
   );
 }
 
+function AdminLink({ role }: { role?: string }) {
+  if (role !== "admin") return null;
+  return (
+    <Link href="/admin" className="mr-1 hidden text-[14px] font-semibold lg:inline">
+      Админка
+    </Link>
+  );
+}
+
 export function Header() {
   const pathname = usePathname();
   const router = useRouter();
@@ -60,6 +69,8 @@ export function Header() {
     setSeenQuery(paramQuery);
     setQuery(paramQuery);
   }
+
+  if (pathname.startsWith("/admin")) return null;
 
   return (
     <>
@@ -127,6 +138,7 @@ export function Header() {
             <ShoppingCart size={22} weight="regular" />
             {count > 0 ? <CartBadge count={count} /> : null}
           </Link>
+          <AdminLink role={user?.role} />
           {user ? (
             <Link
               href="/account"

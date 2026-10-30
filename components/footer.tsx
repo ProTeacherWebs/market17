@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Container } from "@/components/container";
 import { categoryTree } from "@/lib/query";
 import { seedCategories } from "@/lib/seed";
@@ -8,6 +9,7 @@ import { currentUser, useShop } from "@/lib/store";
 import { supportEmail, supportPhone, supportPhoneHref } from "@/lib/site";
 
 export function Footer() {
+  const pathname = usePathname();
   const ready = useShop((state) => state.ready);
   const stored = useShop((state) => state.categories);
   const users = useShop((state) => state.users);
@@ -16,6 +18,8 @@ export function Footer() {
   const categories = ready && stored.length > 0 ? stored : seedCategories;
   const parents = categoryTree(categories);
   const year = new Date().getFullYear();
+
+  if (pathname.startsWith("/admin")) return null;
 
   return (
     <footer className="mt-16 border-t border-line">

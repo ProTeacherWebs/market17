@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
 import { getStripe, rubToKopecks, stripePaymentsReady } from "@/lib/stripe";
 
 export async function GET(request: Request) {
@@ -43,6 +44,24 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "В сессии нет суммы в рублях" }, { status: 400 });
     }
 
+    const paymentStatus = session.payment_status === "paid" ? "paid" : "unpaid";
+    if (paymentStatus === "paid") {
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+      if (order && order.paymentStatus !== "paid") {
+        const amountKopecks = rubToKopecks(amountRub);
+        if (Math.round(order.total * 100) === amountKopecks) {
+          await prisma.order.update({
+            where: { id: orderId },
+            data: {
+              paymentStatus: "paid",
+              paymentId: session.id,
+              status: order.status === "pending_payment" ? "confirmed" : order.status,
+            },
+          });
+        }
+      }
+    }
+
     return NextResponse.json({
       orderId,
       number,
@@ -52,7 +71,7 @@ export async function GET(request: Request) {
       amountUsdCents,
       exchangeRateUzs: Number(session.metadata?.exchangeRateUzs || 0) || null,
       uzsPerUsd: Number(session.metadata?.uzsPerUsd || 0) || null,
-      paymentStatus: session.payment_status === "paid" ? "paid" : "unpaid",
+      paymentStatus,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "";
